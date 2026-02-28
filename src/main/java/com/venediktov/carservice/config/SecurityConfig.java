@@ -32,7 +32,7 @@ public class SecurityConfig {
             .headers().frameOptions().disable().and() 
             .sessionManagement().sessionCreationPolicy(org.springframework.security.config.http.SessionCreationPolicy.STATELESS).and()
             .authorizeRequests()
-                .antMatchers("/", "/index.html", "/static/**", "/css/**", "/js/**", "/img/**", "/auth/register", "/auth/login").permitAll()
+                .antMatchers("/", "/index.html", "/static/**", "/css/**", "/js/**", "/img/**", "/auth/register", "/auth/login", "/h2-console/**").permitAll()
                 .antMatchers(org.springframework.http.HttpMethod.GET, "/car/**").permitAll()
                 .antMatchers("/car/**").hasRole("ADMIN")
                 .antMatchers("/rentals/**").authenticated()
