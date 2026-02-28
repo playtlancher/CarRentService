@@ -31,7 +31,6 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
         
         if (token != null && !token.isEmpty()) {
             Optional<User> userOpt = authService.getUserByToken(token);
-            
             if (userOpt.isPresent()) {
                 User user = userOpt.get();
                 UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
@@ -40,13 +39,8 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
                         Collections.singletonList(new SimpleGrantedAuthority("ROLE_" + user.getRole().name()))
                 );
                 SecurityContextHolder.getContext().setAuthentication(auth);
-            } else {
-                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                response.getWriter().write("Invalid or expired token");
-                return;
             }
         }
-        
         filterChain.doFilter(request, response);
     }
 }

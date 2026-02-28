@@ -38,9 +38,14 @@ public class RentalService {
 
         Car car = carRepository.findById(carId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Car not found"));
-        
-        if (car.getStatus() == Car.CarStatus.RENTED) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Car is already rented");
+
+        markExpiredRentalsCompleted(carId);
+
+        List<Rental> activeRentals = rentalRepository.findByCarIdAndStatus(carId, Rental.RentalStatus.ACTIVE);
+        for (Rental r : activeRentals) {
+            if (datesOverlap(r.getStartDate(), r.getEndDate(), rentalDate, returnDate)) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Car is already booked for some of these dates");
+            }
         }
 
         User user = userRepository.findByUsername(username)
@@ -55,7 +60,6 @@ public class RentalService {
         
         long days = java.time.temporal.ChronoUnit.DAYS.between(rentalDate, returnDate);
         if (days < 1) days = 1; 
-        
 
         BigDecimal pricePerDay = car.getDailyPrice();
         if (pricePerDay == null) pricePerDay = BigDecimal.valueOf(100); 
@@ -63,10 +67,22 @@ public class RentalService {
         BigDecimal totalPrice = pricePerDay.multiply(BigDecimal.valueOf(days));
         rental.setTotalPrice(totalPrice);
         
-        car.setStatus(Car.CarStatus.RENTED);
-        carRepository.save(car);
-        
         return rentalRepository.save(rental);
+    }
+
+    private static boolean datesOverlap(LocalDate s1, LocalDate e1, LocalDate s2, LocalDate e2) {
+        return !e1.isBefore(s2) && !e2.isBefore(s1);
+    }
+
+    private void markExpiredRentalsCompleted(Long carId) {
+        List<Rental> active = rentalRepository.findByCarIdAndStatus(carId, Rental.RentalStatus.ACTIVE);
+        LocalDate today = LocalDate.now();
+        for (Rental r : active) {
+            if (r.getEndDate().isBefore(today)) {
+                r.setStatus(Rental.RentalStatus.COMPLETED);
+                rentalRepository.save(r);
+            }
+        }
     }
     
     public List<Rental> getRentsByUserId(Long userId) {
@@ -80,6 +96,6 @@ public class RentalService {
     }
 
     public List<Rental> getOccupiedDates(Long carId) {
-        return rentalRepository.findByCarId(carId);
+        return rentalRepository.findByCarIdAndStatus(carId, Rental.RentalStatus.ACTIVE);
     }
 }

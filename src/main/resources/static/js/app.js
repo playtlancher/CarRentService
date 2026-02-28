@@ -6,6 +6,7 @@ const auth = {
 
     async login(event) {
         event.preventDefault();
+        ui.setAuthError('login-error', '');
         const formData = new FormData(event.target);
         const data = Object.fromEntries(formData);
         
@@ -21,7 +22,6 @@ const auth = {
                 this.token = token;
                 localStorage.setItem('auth_token', token);
                 
-                // Get user info with the new token
                 const userResponse = await fetch(`${API_URL}/auth/me`, {
                     headers: { 'X-Auth-Token': token }
                 });
@@ -31,15 +31,20 @@ const auth = {
                 ui.closeModal('login-modal');
                 ui.updateAuthView();
             } else {
-                ui.showToast('Invalid credentials', 'error');
+                const msg = await response.text().then(t => t || 'Invalid credentials');
+                ui.setAuthError('login-error', msg);
+                ui.showToast(msg, 'error');
             }
         } catch (err) {
-            ui.showToast('Login failed. Server unreachable.', 'error');
+            const msg = 'Login failed. Server unreachable.';
+            ui.setAuthError('login-error', msg);
+            ui.showToast(msg, 'error');
         }
     },
 
     async register(event) {
         event.preventDefault();
+        ui.setAuthError('register-error', '');
         const formData = new FormData(event.target);
         const data = Object.fromEntries(formData);
 
@@ -55,11 +60,14 @@ const auth = {
                 ui.closeModal('register-modal');
                 ui.showModal('login-modal');
             } else {
-                const msg = await response.text();
+                const msg = await response.text().then(t => t || 'Registration failed');
+                ui.setAuthError('register-error', msg);
                 ui.showToast(msg, 'error');
             }
         } catch (err) {
-            ui.showToast('Registration failed.', 'error');
+            const msg = 'Registration failed. Server unreachable.';
+            ui.setAuthError('register-error', msg);
+            ui.showToast(msg, 'error');
         }
     },
 
@@ -82,30 +90,65 @@ const auth = {
 
 const app = {
     cars: [],
+    map: null,
+    mapMarkers: [],
+
+    showSection(sectionId) {
+        ['section-cars', 'section-my-rentals', 'section-admin'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.toggle('hidden', id !== 'section-' + sectionId);
+        });
+        if (sectionId === 'cars') this.renderCars(), this.renderMap();
+        if (sectionId === 'my-rentals') this.loadMyRentals();
+        if (sectionId === 'admin') this.loadAdminCars();
+    },
 
     async loadCars() {
         const city = document.getElementById('city-filter').value;
         const url = city ? `${API_URL}/car?city=${city}` : `${API_URL}/car`;
-        
         try {
             const response = await fetch(url);
             this.cars = await response.json();
             this.renderCars();
+            this.renderMap();
         } catch (err) {
             console.error('Failed to load cars', err);
         }
     },
 
+    renderMap() {
+        const container = document.getElementById('map-container');
+        if (!container) return;
+        this.mapMarkers.forEach(m => { if (m && m.remove) m.remove(); });
+        this.mapMarkers = [];
+        const withCoords = this.cars.filter(c => c.latitude != null && c.longitude != null);
+        if (withCoords.length === 0) {
+            container.innerHTML = '<p class="loader">No car locations to show. Add latitude/longitude in Admin.</p>';
+            if (this.map) { this.map.remove(); this.map = null; }
+            return;
+        }
+        container.innerHTML = '';
+        const map = L.map(container).setView([withCoords[0].latitude, withCoords[0].longitude], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+        withCoords.forEach(car => {
+            const m = L.marker([car.latitude, car.longitude]).addTo(map)
+                .bindPopup(`<b>${car.brand} ${car.model}</b><br>${car.cityBased || ''}`);
+            this.mapMarkers.push(m);
+        });
+        if (withCoords.length > 1) map.fitBounds(withCoords.map(c => [c.latitude, c.longitude]));
+        this.map = map;
+    },
+
     renderCars() {
         const grid = document.getElementById('car-grid');
+        if (!grid) return;
         if (this.cars.length === 0) {
             grid.innerHTML = '<div class="loader">No cars available for selected criteria.</div>';
             return;
         }
-
         grid.innerHTML = this.cars.map(car => `
             <div class="car-card fade-in">
-                <div class="car-image" style="background-image: url('${car.imageUrl || 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&q=80&w=800'}')"></div>
+                <div class="car-image" style="background-image: url('${(car.imageUrl || 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&q=80&w=800').replace(/'/g, "\\'")}')"></div>
                 <div class="car-info">
                     <div class="car-brand">${car.brand}</div>
                     <div class="car-model">${car.model} (${car.productionYear})</div>
@@ -113,7 +156,7 @@ const app = {
                         <span>${car.cityBased || 'Main Hub'}</span>
                         <div class="car-price">$${car.dailyPrice || 99}<span>/day</span></div>
                     </div>
-                    <button onclick="app.openRentModal(${car.id}, '${car.brand} ${car.model}')" class="btn btn-primary full-width">Rent This Car</button>
+                    <button onclick="app.openRentModal(${car.id}, '${(car.brand + ' ' + car.model).replace(/'/g, "\\'")}')" class="btn btn-primary full-width">Rent This Car</button>
                 </div>
             </div>
         `).join('');
@@ -166,7 +209,7 @@ const app = {
                     'Content-Type': 'application/json',
                     'X-Auth-Token': auth.token
                 },
-                body: JSON.stringify({ carId, startDate, endDate })
+                body: JSON.stringify({ carId: Number(carId), startDate, endDate })
             });
 
             if (response.ok) {
@@ -181,16 +224,152 @@ const app = {
         } catch (err) {
             ui.showToast('Server error during booking.', 'error');
         }
+    },
+
+    async loadMyRentals() {
+        const list = document.getElementById('my-rentals-list');
+        if (!list) return;
+        if (!auth.token) { list.innerHTML = '<p class="loader">Please log in to see your rentals.</p>'; return; }
+        list.innerHTML = '<div class="loader">Loading...</div>';
+        try {
+            const [rentalsRes, carsRes] = await Promise.all([
+                fetch(`${API_URL}/rentals/history`, { headers: { 'X-Auth-Token': auth.token } }),
+                fetch(`${API_URL}/car`)
+            ]);
+            if (!rentalsRes.ok) { list.innerHTML = '<p class="status-error">Failed to load rentals.</p>'; return; }
+            const rentals = await rentalsRes.json();
+            const cars = await carsRes.json();
+            const carMap = Object.fromEntries(cars.map(c => [c.id, c]));
+            if (rentals.length === 0) {
+                list.innerHTML = '<p class="loader">You have no rentals yet.</p>';
+                return;
+            }
+            list.innerHTML = rentals.map(r => {
+                const car = carMap[r.carId] || {};
+                return `<div class="rental-card">
+                    <div>
+                        <strong>${car.brand || ''} ${car.model || ''}</strong> (${r.startDate} → ${r.endDate})<br>
+                        <span class="text-dim">$${r.totalPrice || '-'} · ${r.status}</span>
+                    </div>
+                </div>`;
+            }).join('');
+        } catch (err) {
+            list.innerHTML = '<p class="status-error">Could not load rentals.</p>';
+        }
+    },
+
+    async loadAdminCars() {
+        const list = document.getElementById('admin-cars-list');
+        if (!list) return;
+        if (!auth.token || (auth.user && auth.user.role !== 'ADMIN')) {
+            list.innerHTML = '<p class="loader">Admin only.</p>';
+            return;
+        }
+        list.innerHTML = '<div class="loader">Loading...</div>';
+        try {
+            const r = await fetch(`${API_URL}/car`, { headers: { 'X-Auth-Token': auth.token } });
+            const cars = await r.json();
+            this.cars = cars;
+            if (cars.length === 0) { list.innerHTML = '<p class="loader">No cars. Add one above.</p>'; return; }
+            list.innerHTML = cars.map(car => `
+                <div class="car-card fade-in">
+                    <div class="car-image" style="background-image: url('${(car.imageUrl || 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&q=80&w=800').replace(/'/g, "\\'")}')"></div>
+                    <div class="car-info" style="flex:1">
+                        <div class="car-brand">${car.brand} ${car.model}</div>
+                        <div class="car-details">${car.cityBased || ''} · $${car.dailyPrice || 0}/day</div>
+                        <div style="margin-top:0.5rem">
+                            <button onclick="app.editCar(${car.id})" class="btn btn-outline" style="margin-right:0.5rem">Edit</button>
+                            <button onclick="app.deleteCar(${car.id})" class="btn btn-secondary">Delete</button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        } catch (err) {
+            list.innerHTML = '<p class="status-error">Failed to load cars.</p>';
+        }
+    },
+
+    editCar(id) {
+        const car = this.cars.find(c => c.id === id) || {};
+        document.getElementById('admin-car-id').value = id;
+        document.getElementById('admin-brand').value = car.brand || '';
+        document.getElementById('admin-model').value = car.model || '';
+        document.getElementById('admin-vinCode').value = car.vinCode || '';
+        document.getElementById('admin-cityBased').value = car.cityBased || '';
+        document.getElementById('admin-productionYear').value = car.productionYear || '';
+        document.getElementById('admin-dailyPrice').value = car.dailyPrice || '';
+        document.getElementById('admin-imageUrl').value = car.imageUrl || '';
+        document.getElementById('admin-description').value = car.description || '';
+        document.getElementById('admin-latitude').value = car.latitude != null ? car.latitude : '';
+        document.getElementById('admin-longitude').value = car.longitude != null ? car.longitude : '';
+    },
+
+    async deleteCar(id) {
+        if (!confirm('Delete this car?')) return;
+        try {
+            const r = await fetch(`${API_URL}/car/${id}`, {
+                method: 'DELETE',
+                headers: { 'X-Auth-Token': auth.token }
+            });
+            if (r.ok) { ui.showToast('Car deleted.'); this.loadAdminCars(); this.loadCars(); }
+            else ui.showToast('Delete failed.', 'error');
+        } catch (err) { ui.showToast('Delete failed.', 'error'); }
+    },
+
+    async saveCar(event) {
+        event.preventDefault();
+        const id = document.getElementById('admin-car-id').value;
+        const payload = {
+            brand: document.getElementById('admin-brand').value,
+            model: document.getElementById('admin-model').value,
+            vinCode: document.getElementById('admin-vinCode').value || null,
+            cityBased: document.getElementById('admin-cityBased').value || null,
+            productionYear: parseInt(document.getElementById('admin-productionYear').value, 10),
+            dailyPrice: parseFloat(document.getElementById('admin-dailyPrice').value) || 0,
+            imageUrl: document.getElementById('admin-imageUrl').value || null,
+            description: document.getElementById('admin-description').value || null,
+            latitude: document.getElementById('admin-latitude').value ? parseFloat(document.getElementById('admin-latitude').value) : null,
+            longitude: document.getElementById('admin-longitude').value ? parseFloat(document.getElementById('admin-longitude').value) : null
+        };
+        const url = id ? `${API_URL}/car/${id}` : `${API_URL}/car`;
+        const method = id ? 'PUT' : 'POST';
+        try {
+            const r = await fetch(url, {
+                method,
+                headers: { 'Content-Type': 'application/json', 'X-Auth-Token': auth.token },
+                body: JSON.stringify(payload)
+            });
+            if (r.ok) {
+                ui.showToast('Car saved.');
+                document.getElementById('admin-car-form').reset();
+                document.getElementById('admin-car-id').value = '';
+                this.loadAdminCars();
+                this.loadCars();
+            } else {
+                ui.showToast('Save failed.', 'error');
+            }
+        } catch (err) {
+            ui.showToast('Save failed.', 'error');
+        }
     }
 };
 
 const ui = {
     showModal(id) {
+        if (id === 'login-modal') ui.setAuthError('login-error', '');
+        if (id === 'register-modal') ui.setAuthError('register-error', '');
         document.getElementById(id).style.display = 'block';
     },
 
     closeModal(id) {
         document.getElementById(id).style.display = 'none';
+    },
+
+    setAuthError(elementId, message) {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        el.textContent = message;
+        el.classList.toggle('hidden', !message);
     },
 
     showToast(message, type = 'success') {
@@ -220,21 +399,38 @@ const ui = {
         const authLinks = document.getElementById('auth-links');
         const userProfile = document.getElementById('user-profile');
         const usernameDisplay = document.getElementById('username-display');
+        const navMyRentals = document.getElementById('nav-my-rentals');
+        const navAdmin = document.getElementById('nav-admin');
 
         if (auth.token) {
             authLinks.classList.add('hidden');
             userProfile.classList.remove('hidden');
-            // Extract username from token if user object is not available yet
-            usernameDisplay.innerText = auth.user ? auth.user.username : 'User';
+            const name = (auth.user && auth.user.username) ? auth.user.username : 'User';
+            usernameDisplay.innerText = name;
+            if (navMyRentals) navMyRentals.classList.remove('hidden');
+            if (navAdmin) navAdmin.classList.toggle('hidden', !(auth.user && auth.user.role === 'ADMIN'));
         } else {
             authLinks.classList.remove('hidden');
             userProfile.classList.add('hidden');
+            if (navMyRentals) navMyRentals.classList.add('hidden');
+            if (navAdmin) navAdmin.classList.add('hidden');
         }
     }
 };
 
+// Load current user when token exists (e.g. after refresh)
+async function initAuth() {
+    if (auth.token) {
+        try {
+            const r = await fetch(`${API_URL}/auth/me`, { headers: { 'X-Auth-Token': auth.token } });
+            if (r.ok) auth.user = await r.json();
+            else auth.token = null;
+        } catch (_) { auth.token = null; }
+    }
+    ui.updateAuthView();
+}
+
 // Tooltip/Init
 document.addEventListener('DOMContentLoaded', () => {
-    app.loadCars();
-    ui.updateAuthView();
+    initAuth().then(() => { app.loadCars(); });
 });

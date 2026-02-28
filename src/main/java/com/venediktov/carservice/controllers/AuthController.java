@@ -1,5 +1,6 @@
 package com.venediktov.carservice.controllers;
 
+import com.venediktov.carservice.dto.UserDto;
 import com.venediktov.carservice.model.User;
 import com.venediktov.carservice.model.UserToken;
 import com.venediktov.carservice.repositories.UserRepository;
@@ -64,11 +65,12 @@ public class AuthController {
     }
 
     @GetMapping("/me")
-    public ResponseEntity<User> getCurrentUser(java.security.Principal principal) {
+    public ResponseEntity<UserDto> getCurrentUser(java.security.Principal principal) {
         if (principal == null) {
             return ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build();
         }
         return userRepository.findByUsername(principal.getName())
+                .map(UserDto::from)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.status(org.springframework.http.HttpStatus.UNAUTHORIZED).build());
     }

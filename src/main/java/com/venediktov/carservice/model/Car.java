@@ -22,6 +22,9 @@ public class Car extends BaseEntity {
     
     private String description;
 
+    private Double latitude;
+    private Double longitude;
+
     public enum CarStatus {
         AVAILABLE,
         RENTED,
