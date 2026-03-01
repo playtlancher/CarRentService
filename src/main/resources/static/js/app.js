@@ -94,11 +94,27 @@ const app = {
     mapMarkers: [],
 
     showSection(sectionId) {
-        ['section-cars', 'section-my-rentals', 'section-admin'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.classList.toggle('hidden', id !== 'section-' + sectionId);
+        ['cars', 'my-rentals', 'admin'].forEach(id => {
+            const el = document.getElementById('section-' + id);
+            if (el) el.classList.toggle('hidden', id !== sectionId);
         });
-        if (sectionId === 'cars') this.renderCars(), this.renderMap();
+
+        const hero = document.querySelector('.hero');
+        if (hero) hero.classList.toggle('hidden', sectionId !== 'cars');
+
+        document.querySelectorAll('.nav-links a').forEach(link => {
+            const onclick = link.getAttribute('onclick');
+            if (onclick && onclick.includes(`'${sectionId}'`)) {
+                link.classList.add('active');
+            } else {
+                link.classList.remove('active');
+            }
+        });
+
+        if (sectionId === 'cars') {
+            this.renderCars();
+            this.renderMap();
+        }
         if (sectionId === 'my-rentals') this.loadMyRentals();
         if (sectionId === 'admin') this.loadAdminCars();
     },
@@ -119,12 +135,18 @@ const app = {
     renderMap() {
         const container = document.getElementById('map-container');
         if (!container) return;
+
+        if (this.map) {
+            this.map.remove();
+            this.map = null;
+        }
+
         this.mapMarkers.forEach(m => { if (m && m.remove) m.remove(); });
         this.mapMarkers = [];
+
         const withCoords = this.cars.filter(c => c.latitude != null && c.longitude != null);
         if (withCoords.length === 0) {
             container.innerHTML = '<p class="loader">No car locations to show. Add latitude/longitude in Admin.</p>';
-            if (this.map) { this.map.remove(); this.map = null; }
             return;
         }
         container.innerHTML = '';
@@ -135,7 +157,10 @@ const app = {
                 .bindPopup(`<b>${car.brand} ${car.model}</b><br>${car.cityBased || ''}`);
             this.mapMarkers.push(m);
         });
-        if (withCoords.length > 1) map.fitBounds(withCoords.map(c => [c.latitude, c.longitude]));
+        if (withCoords.length > 1) {
+            map.fitBounds(withCoords.map(c => [c.latitude, c.longitude]), { padding: [20, 20] });
+        }
+        setTimeout(() => map.invalidateSize(), 100);
         this.map = map;
     },
 
@@ -178,7 +203,9 @@ const app = {
         ui.showModal('rent-modal');
 
         try {
-            const response = await fetch(`${API_URL}/rentals/car/${id}`);
+            const response = await fetch(`${API_URL}/rentals/car/${id}`, {
+                headers: { 'X-Auth-Token': auth.token }
+            });
             const rentals = await response.json();
             
             if (rentals.length === 0) {
@@ -302,6 +329,13 @@ const app = {
         document.getElementById('admin-description').value = car.description || '';
         document.getElementById('admin-latitude').value = car.latitude != null ? car.latitude : '';
         document.getElementById('admin-longitude').value = car.longitude != null ? car.longitude : '';
+
+        const formWrap = document.querySelector('.admin-form-wrap');
+        if (formWrap) {
+            formWrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            formWrap.style.outline = '2px solid var(--primary-color)';
+            setTimeout(() => formWrap.style.outline = 'none', 2000);
+        }
     },
 
     async deleteCar(id) {

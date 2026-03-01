@@ -79,6 +79,11 @@ body {
     color: var(--text-color);
 }
 
+.nav-links a.active {
+    color: var(--primary-color);
+    text-shadow: 0 0 10px rgba(0, 122, 255, 0.5);
+}
+
 /* Hero */
 .hero {
     height: 100vh;
